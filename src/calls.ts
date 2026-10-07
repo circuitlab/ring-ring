@@ -55,6 +55,19 @@ export class CallController {
     return this.phone.number || "unknown number";
   }
 
+  /**
+   * Shows who the bot is relaying in the voice channel by renaming it for
+   * the duration of the call (null restores the default name). Needs the
+   * Change Nickname permission; failure only costs the cosmetic.
+   */
+  private async setNickname(nickname: string | null): Promise<void> {
+    try {
+      await this.voiceChannel.guild.members.me?.setNickname(nickname);
+    } catch (e) {
+      console.warn(`could not set nickname: ${(e as Error).message}`);
+    }
+  }
+
   private async onIncoming(number: string): Promise<void> {
     console.info(`incoming call from ${number || "unknown"}`);
     this.answeredBy = "";
@@ -111,6 +124,7 @@ export class CallController {
     try {
       await this.phone.answer();
       await this.phone.enableUsbAudio();
+      await this.setNickname(`📞 ${this.caller()}`.slice(0, 32));
       const bridge = new CallBridge(this.audioPortPath, this.voiceChannel);
       this.bridge = bridge;
       await bridge.start();
@@ -146,6 +160,7 @@ export class CallController {
     const bridge = this.bridge;
     this.bridge = undefined;
     await bridge?.stop();
+    if (answered) await this.setNickname(null);
 
     const message = this.message;
     this.message = undefined;
