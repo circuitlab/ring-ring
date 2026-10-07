@@ -1,0 +1,7 @@
+// Allow the ring-ring service user to delete SMS via ModemManager.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.ModemManager1.Messaging" &&
+        subject.user == "circuitlab") {
+        return polkit.Result.YES;
+    }
+});

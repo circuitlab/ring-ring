@@ -1,0 +1,29 @@
+[Unit]
+Description=ring-ring: Discord bot for the SIM7600 modem (SMS forwarding)
+After=ModemManager.service network-online.target
+Wants=ModemManager.service network-online.target
+
+[Service]
+Type=simple
+User=circuitlab
+Group=circuitlab
+EnvironmentFile=/etc/ring-ring/ring-ring.env
+WorkingDirectory=/opt/ring-ring
+ExecStart=/opt/ring-ring/node/bin/node src/main.ts
+StateDirectory=ring-ring
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
