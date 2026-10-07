@@ -44,12 +44,20 @@ A Discord bot for the SIM-equipped modem on this server.
 
 ## Installation
 
-As a user with sudo rights (circuitlab):
+As the service user with sudo rights (circuitlab), from a checkout in its home:
 
 ```sh
-sudo sh deploy/install.sh     # from a checkout of this repository
+git clone https://github.com/circuitlab/ring-ring.git ~/ring-ring
+cd ~/ring-ring
+sudo sh deploy/install.sh
 sudo systemctl enable --now ring-ring
 journalctl -u ring-ring -f
+```
+
+To deploy a new version:
+
+```sh
+cd ~/ring-ring && git pull && sudo sh deploy/install.sh
 ```
 
 `install.sh` installs a pinned Node.js under `/opt/ring-ring/node` (the
@@ -58,7 +66,8 @@ dependencies under `/opt/ring-ring`, the systemd unit and a polkit rule.
 
 The service config is `/etc/ring-ring/ring-ring.env`. If `deploy/ring-ring.env`
 exists (git-ignored, holds the bot token), `install.sh` installs it there;
-otherwise it installs `deploy/ring-ring.env.example` for you to edit.
+otherwise it installs `deploy/ring-ring.env.example` once and then leaves
+the existing config alone (edit it with `sudoedit /etc/ring-ring/ring-ring.env`).
 
 After changing the code or config, run `install.sh` again to deploy and restart.
 
