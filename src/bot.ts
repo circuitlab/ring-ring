@@ -2,6 +2,7 @@ import {
   type ButtonInteraction, type ChatInputCommandInteraction, Client, EmbedBuilder, Events, GatewayIntentBits,
   MessageFlags, type SendableChannels, SlashCommandBuilder, type VoiceBasedChannel,
 } from "discord.js";
+import { checkDialNumber } from "./calls.ts";
 import type { ModemManager, Sms } from "./modem.ts";
 
 // Roughly 10 UCS-2 segments; caps the cost of a single command.
@@ -9,6 +10,11 @@ const SMS_MAX_LENGTH = 670;
 const PHONE_NUMBER = /^\+?[0-9]{3,20}$/;
 
 const COMMANDS = [
+  new SlashCommandBuilder()
+    .setName("call")
+    .setDescription("Call a phone number and bridge it into the voice channel")
+    .addStringOption((o) =>
+      o.setName("to").setDescription("Domestic number, e.g. 09012345678 (prefix 184 to hide caller ID)").setRequired(true)),
   new SlashCommandBuilder().setName("status").setDescription("Show modem status"),
   new SlashCommandBuilder()
     .setName("sms")
@@ -49,6 +55,8 @@ export class Bot {
   channel: SendableChannels | undefined;
   /** Set by the call controller to receive button clicks. */
   buttonHandler: ((interaction: ButtonInteraction) => Promise<void>) | undefined;
+  /** Set by the call controller to place outgoing calls; /call is disabled without it. */
+  dialHandler: ((interaction: ChatInputCommandInteraction, number: string) => Promise<void>) | undefined;
   private mm: ModemManager;
   private channelId: string;
 
@@ -99,6 +107,8 @@ export class Bot {
     switch (interaction.commandName) {
       case "status":
         return this.status(interaction);
+      case "call":
+        return this.call(interaction);
       case "sms":
         return this.sendSms(interaction);
     }
@@ -120,6 +130,24 @@ export class Bot {
       });
     }
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  }
+
+  private async call(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!this.dialHandler) {
+      await interaction.reply({ content: "Calls are disabled.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    // Access control: only members of the (private) channel may call.
+    if (interaction.channelId !== this.channelId) {
+      await interaction.reply({ content: `Use this command in <#${this.channelId}>.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const checked = checkDialNumber(interaction.options.getString("to", true));
+    if ("error" in checked) {
+      await interaction.reply({ content: checked.error, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await this.dialHandler(interaction, checked.number);
   }
 
   private async sendSms(interaction: ChatInputCommandInteraction): Promise<void> {

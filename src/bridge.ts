@@ -108,7 +108,8 @@ export class CallBridge {
       return;
     }
     this.port.on("data", (chunk: Buffer) => this.toDiscord.write(this.upsampler.process(chunk)));
-    this.port.on("error", (e) => console.warn(`audio port error: ${e.message}`));
+    // Closing the port cancels the pending read; that is not worth a warning.
+    this.port.on("error", (e) => this.stopped || console.warn(`audio port error: ${e.message}`));
 
     this.ticking = true;
     void this.tick();

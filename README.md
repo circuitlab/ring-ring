@@ -11,6 +11,10 @@ A Discord bot for the SIM-equipped modem on this server.
   Answering bridges the call into a voice channel: everyone in the channel
   hears the caller, and the caller hears everyone (mixed). Hang up from
   Discord or the phone; missed calls are marked as such.
+- `/call to` calls a number and bridges it into the voice channel the same
+  way. Only domestic Japanese numbers are allowed (optionally prefixed with
+  184/186); emergency and other short codes and international calls are
+  blocked. A callee's voicemail counts as answered.
 
 ## How it works
 

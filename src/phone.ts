@@ -4,26 +4,39 @@ import type { AtPort } from "./at.ts";
 // RING repeats every ~3 s while the phone rings; if it stops without a
 // MISSED_CALL report, assume the caller gave up.
 const RING_TIMEOUT_MS = 8000;
+// Give up on an outgoing call nobody picks up.
+const DIAL_TIMEOUT_MS = 60_000;
 
-export type PhoneState = "idle" | "ringing" | "active";
+export type PhoneState = "idle" | "ringing" | "dialing" | "active";
+
+/** Why an unanswered call ended: no answer, busy line, or other failure. */
+export type EndReason = "normal" | "no-answer" | "busy";
+
+export interface EndInfo {
+  answered: boolean;
+  durationSec: number;
+  reason: EndReason;
+}
 
 export interface PhoneEvents {
   incoming: [number: string];
   answered: [];
-  ended: [info: { answered: boolean; durationSec: number }];
+  ended: [info: EndInfo];
 }
 
 /**
  * Voice call state machine driven by the modem's AT port (SIM7600 URCs).
  *
- * Emits "incoming" (number) when a call starts ringing, "answered" once
- * answered, and "ended" ({ answered, durationSec }) when it is over.
+ * Emits "incoming" (number) when a call starts ringing, "answered" once an
+ * incoming call is answered or an outgoing call is picked up, and "ended"
+ * when it is over.
  */
 export class Phone extends EventEmitter<PhoneEvents> {
   state: PhoneState = "idle";
   number = "";
   private at: AtPort;
   private ringTimer: NodeJS.Timeout | undefined;
+  private dialTimer: NodeJS.Timeout | undefined;
   private startedAt = 0;
 
   constructor(at: AtPort) {
@@ -41,13 +54,23 @@ export class Phone extends EventEmitter<PhoneEvents> {
       this.onRing().catch((e) => console.warn(`RING handling failed: ${(e as Error).message}`));
     } else if (line.startsWith("MISSED_CALL:") && this.state === "ringing") {
       this.end();
+    } else if (line.startsWith("VOICE CALL: BEGIN") && this.state === "dialing") {
+      clearTimeout(this.dialTimer);
+      this.state = "active";
+      this.startedAt = Date.now();
+      this.emit("answered");
+    } else if (line === "BUSY" && this.state === "dialing") {
+      this.end("busy");
+    } else if (line === "NO ANSWER" && this.state === "dialing") {
+      this.end("no-answer");
     } else if ((line.startsWith("VOICE CALL: END") || line === "NO CARRIER") && this.state !== "idle") {
       this.end();
     }
   }
 
   private async onRing(): Promise<void> {
-    if (this.state === "active") return;
+    // Only one call at a time; a second call keeps ringing on its own.
+    if (this.state === "active" || this.state === "dialing") return;
     clearTimeout(this.ringTimer);
     this.ringTimer = setTimeout(() => this.state === "ringing" && this.end(), RING_TIMEOUT_MS);
     if (this.state === "ringing") return;
@@ -76,6 +99,30 @@ export class Phone extends EventEmitter<PhoneEvents> {
     this.state = "active";
     this.startedAt = Date.now();
     this.emit("answered");
+  }
+
+  /** Places an outgoing voice call; "answered" fires when the callee picks up. */
+  async dial(number: string): Promise<void> {
+    if (this.state !== "idle") throw new Error("the line is busy");
+    this.state = "dialing";
+    this.number = number;
+    this.dialTimer = setTimeout(() => {
+      if (this.state !== "dialing") return;
+      console.info("outgoing call not answered in time, hanging up");
+      this.at.command("AT+CHUP", 10_000).catch(() => {}).finally(() => this.state === "dialing" && this.end("no-answer"));
+    }, DIAL_TIMEOUT_MS);
+    try {
+      // The trailing ';' makes it a voice call.
+      await this.at.command(`ATD${number};`, 10_000);
+    } catch (e) {
+      if (this.state !== "dialing") throw e;
+      const message = (e as Error).message;
+      // A busy or unreachable callee is an outcome, not a failure.
+      if (/BUSY/.test(message)) return this.end("busy");
+      if (/NO ANSWER|NO CARRIER/.test(message)) return this.end("no-answer");
+      // Left in "dialing": the caller reports the failure and hangs up, which ends the call.
+      throw e;
+    }
   }
 
   /**
@@ -121,11 +168,12 @@ export class Phone extends EventEmitter<PhoneEvents> {
     }
   }
 
-  private end(): void {
+  private end(reason: EndReason = "normal"): void {
     clearTimeout(this.ringTimer);
+    clearTimeout(this.dialTimer);
     const answered = this.state === "active";
     const durationSec = answered ? Math.round((Date.now() - this.startedAt) / 1000) : 0;
     this.state = "idle";
-    this.emit("ended", { answered, durationSec });
+    this.emit("ended", { answered, durationSec, reason });
   }
 }

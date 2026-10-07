@@ -1,10 +1,14 @@
 import { EventEmitter } from "node:events";
 import { SerialPort } from "serialport";
 
-const FINAL = /^(OK|ERROR|\+CME ERROR:.*|\+CMS ERROR:.*|NO CARRIER|BUSY|NO ANSWER)$/;
+const FINAL = /^(OK|ERROR|\+CME ERROR:.*|\+CMS ERROR:.*)$/;
+// Call setup failures end ATD/ATA; for any other command they are URCs.
+const CALL_FINAL = /^(NO CARRIER|BUSY|NO ANSWER|NO DIALTONE)$/;
+const CALL_COMMAND = /^AT[DA]/i;
 // Unsolicited result codes that may arrive in the middle of a command.
-// (A bare "NO CARRIER" is a URC only when no command is pending.)
-const URC = /^(RING|MISSED_CALL:|VOICE CALL:|\+CMTI:|\+CLIP:)/;
+const URC = /^(RING|MISSED_CALL:|VOICE CALL:|\+CMTI:|\+CLIP:|NO CARRIER|BUSY|NO ANSWER)/;
+// Lines buffered before we opened the port (e.g. URCs from earlier calls) are stale.
+const STALE_MS = 300;
 const LOG_AT = process.env.LOG_AT === "1";
 
 interface Pending {
@@ -27,6 +31,7 @@ export class AtPort extends EventEmitter {
   private buffer = "";
   private queue: Array<() => void> = [];
   private pending: Pending | undefined;
+  private discardUntil = 0;
 
   constructor(path: string) {
     super();
@@ -36,8 +41,12 @@ export class AtPort extends EventEmitter {
     this.port.on("close", () => this.emit("close"));
   }
 
-  open(): Promise<void> {
-    return new Promise((resolve, reject) => this.port.open((e) => (e ? reject(e) : resolve())));
+  async open(): Promise<void> {
+    await new Promise<void>((resolve, reject) => this.port.open((e) => (e ? reject(e) : resolve())));
+    this.discardUntil = Date.now() + STALE_MS;
+    await new Promise<void>((resolve) => this.port.flush(() => resolve()));
+    await new Promise((r) => setTimeout(r, STALE_MS));
+    this.buffer = "";
   }
 
   close(): void {
@@ -67,6 +76,7 @@ export class AtPort extends EventEmitter {
   }
 
   private onData(data: Buffer): void {
+    if (Date.now() < this.discardUntil) return;
     this.buffer += data.toString("latin1");
     let idx;
     while ((idx = this.buffer.search(/\r\n|\r|\n/)) >= 0) {
@@ -85,14 +95,15 @@ export class AtPort extends EventEmitter {
       this.emit("urc", line);
       return;
     }
+    const callFinal = CALL_COMMAND.test(p.command) && CALL_FINAL.test(line);
     // URCs can interleave with a command's response; surface them anyway.
     // "VOICE CALL: BEGIN/END" is also part of the ATA/AT+CHUP response.
-    if (URC.test(line)) {
+    if (URC.test(line) && !callFinal) {
       this.emit("urc", line);
       if (!line.startsWith("VOICE CALL:")) return;
     }
     p.lines.push(line);
-    if (FINAL.test(line)) {
+    if (FINAL.test(line) || callFinal) {
       clearTimeout(p.timer);
       this.pending = undefined;
       if (line === "OK") p.resolve(p.lines.slice(0, -1));

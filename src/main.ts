@@ -34,6 +34,7 @@ if (config.voiceChannelId) {
   const voiceChannel = await bot.fetchVoiceChannel(config.voiceChannelId);
   calls = new CallController(phone, bot.channel!, voiceChannel, config.modemAudioPort);
   bot.buttonHandler = (interaction) => calls!.onButton(interaction);
+  bot.dialHandler = (interaction, number) => calls!.dial(interaction, number);
   console.info(`calls enabled (voice channel #${voiceChannel.name})`);
 }
 
