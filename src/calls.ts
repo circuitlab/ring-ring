@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, ButtonBuilder, type ButtonInteraction, ButtonStyle, EmbedBuilder,
-  type Message, MessageFlags, type SendableChannels, type VoiceBasedChannel,
+  type Message, MessageFlags, Routes, type SendableChannels, type VoiceBasedChannel,
 } from "discord.js";
 import { CallBridge } from "./bridge.ts";
 import type { Phone } from "./phone.ts";
@@ -56,15 +56,15 @@ export class CallController {
   }
 
   /**
-   * Shows who the bot is relaying in the voice channel by renaming it for
-   * the duration of the call (null restores the default name). Needs the
-   * Change Nickname permission; failure only costs the cosmetic.
+   * Sets the voice channel's status line ("" clears it). Without Manage
+   * Channels the bot may only do this while connected to the channel.
+   * Failure only costs the cosmetic.
    */
-  private async setNickname(nickname: string | null): Promise<void> {
+  private async setVoiceStatus(status: string): Promise<void> {
     try {
-      await this.voiceChannel.guild.members.me?.setNickname(nickname);
+      await this.voiceChannel.client.rest.put(Routes.channelVoiceStatus(this.voiceChannel.id), { body: { status } });
     } catch (e) {
-      console.warn(`could not set nickname: ${(e as Error).message}`);
+      console.warn(`could not set voice channel status: ${(e as Error).message}`);
     }
   }
 
@@ -124,7 +124,6 @@ export class CallController {
     try {
       await this.phone.answer();
       await this.phone.enableUsbAudio();
-      await this.setNickname(`📞 ${this.caller()}`.slice(0, 32));
       const bridge = new CallBridge(this.audioPortPath, this.voiceChannel);
       this.bridge = bridge;
       await bridge.start();
@@ -134,6 +133,7 @@ export class CallController {
         await bridge.stop();
         return;
       }
+      await this.setVoiceStatus(`📞 On call: ${this.caller()}`);
     } catch (e) {
       if (this.phone.state === "idle") return; // call ended meanwhile; onEnded handled it
       console.error(`answering failed: ${(e as Error).message}`);
@@ -159,8 +159,10 @@ export class CallController {
     console.info(`call ended (answered: ${answered}, ${durationSec}s)`);
     const bridge = this.bridge;
     this.bridge = undefined;
-    await bridge?.stop();
-    if (answered) await this.setNickname(null);
+    if (bridge) {
+      await this.setVoiceStatus(""); // while still connected
+      await bridge.stop();
+    }
 
     const message = this.message;
     this.message = undefined;
@@ -173,6 +175,7 @@ export class CallController {
   }
 
   async shutdown(): Promise<void> {
+    if (this.bridge) await this.setVoiceStatus("");
     await this.bridge?.stop();
     await this.phone.hangup().catch(() => {});
   }
