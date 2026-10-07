@@ -11,8 +11,11 @@
     "check": "tsc"
   },
   "dependencies": {
+    "@discordjs/voice": "^0.19.2",
     "dbus-next": "^0.10.2",
-    "discord.js": "^14.27.0"
+    "discord.js": "^14.27.0",
+    "opusscript": "^0.0.8",
+    "serialport": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

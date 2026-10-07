@@ -7,13 +7,20 @@ A Discord bot for the SIM-equipped modem on this server.
 - `/sms to text` sends an SMS. It only works in the configured channel, which
   is private, so channel membership is the access control. The result is
   posted publicly in the channel as an audit trail.
-
-Planned: bridging phone calls to a voice channel.
+- Incoming phone calls are posted to the channel with Answer/Decline buttons.
+  Answering bridges the call into a voice channel: everyone in the channel
+  hears the caller, and the caller hears everyone (mixed). Hang up from
+  Discord or the phone; missed calls are marked as such.
 
 ## How it works
 
 - Target hardware: SIMCOM SIM7600G-H, managed by ModemManager (QMI); the bot
   talks to ModemManager over the system D-Bus
+- Calls are controlled over the modem's AT port (interface 03, which
+  ModemManager leaves alone): `RING`/`AT+CLCC` to detect, `ATA`/`AT+CHUP` to
+  answer and hang up, `AT+CPCMREG=1` to route call audio to the USB audio
+  port (interface 04) as 8 kHz 16-bit mono PCM. The bot resamples it to and
+  from Discord's 48 kHz and encodes Opus with `opusscript` (pure JS)
 - Written in TypeScript and run directly by Node.js (type stripping, no build)
 - New SMS are picked up immediately via D-Bus signals; a rescan every
   60 seconds catches anything that was missed
@@ -28,8 +35,8 @@ Planned: bridging phone calls to a voice channel.
 2. Bot tab: Reset Token and put it in `DISCORD_TOKEN`. No privileged intents
    are needed.
 3. OAuth2 > URL Generator: scopes `bot` and `applications.commands`;
-   permissions View Channel, Send Messages, Embed Links. Open the URL to
-   invite the bot.
+   permissions View Channel, Send Messages, Embed Links, Connect, Speak.
+   Open the URL to invite the bot.
 
 ## Installation
 

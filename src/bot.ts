@@ -1,6 +1,6 @@
 import {
-  type ChatInputCommandInteraction, Client, EmbedBuilder, Events, GatewayIntentBits,
-  MessageFlags, SlashCommandBuilder, type TextBasedChannel,
+  type ButtonInteraction, type ChatInputCommandInteraction, Client, EmbedBuilder, Events, GatewayIntentBits,
+  MessageFlags, type SendableChannels, SlashCommandBuilder, type VoiceBasedChannel,
 } from "discord.js";
 import type { ModemManager, Sms } from "./modem.ts";
 
@@ -44,8 +44,11 @@ export function smsEmbed(sms: Sms, modemLabel: string): EmbedBuilder {
 }
 
 export class Bot {
-  readonly client = new Client({ intents: [GatewayIntentBits.Guilds] });
-  private channel: TextBasedChannel | undefined;
+  // GuildVoiceStates is needed to join voice channels.
+  readonly client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
+  channel: SendableChannels | undefined;
+  /** Set by the call controller to receive button clicks. */
+  buttonHandler: ((interaction: ButtonInteraction) => Promise<void>) | undefined;
   private mm: ModemManager;
   private channelId: string;
 
@@ -53,6 +56,12 @@ export class Bot {
     this.mm = mm;
     this.channelId = channelId;
     this.client.on(Events.InteractionCreate, (interaction) => {
+      if (interaction.isButton() && this.buttonHandler) {
+        this.buttonHandler(interaction).catch((e) => {
+          console.error(`button ${interaction.customId} failed: ${(e as Error).message}`);
+        });
+        return;
+      }
       if (!interaction.isChatInputCommand()) return;
       this.handleCommand(interaction).catch((e) => {
         console.error(`/${interaction.commandName} failed: ${(e as Error).message}`);
@@ -66,7 +75,7 @@ export class Bot {
     await ready;
 
     const channel = await this.client.channels.fetch(this.channelId);
-    if (!channel?.isTextBased() || !("guild" in channel)) {
+    if (!channel?.isSendable() || !("guild" in channel)) {
       throw new Error(`channel ${this.channelId} is not a guild text channel`);
     }
     this.channel = channel;
@@ -75,8 +84,14 @@ export class Bot {
     console.info(`logged in as ${this.client.user?.tag}, posting to #${channel.name}`);
   }
 
+  async fetchVoiceChannel(id: string): Promise<VoiceBasedChannel> {
+    const channel = await this.client.channels.fetch(id);
+    if (!channel?.isVoiceBased()) throw new Error(`channel ${id} is not a voice channel`);
+    return channel;
+  }
+
   async postSms(sms: Sms, modemLabel: string): Promise<void> {
-    if (!this.channel || !("send" in this.channel)) throw new Error("bot not ready");
+    if (!this.channel) throw new Error("bot not ready");
     await this.channel.send({ embeds: [smsEmbed(sms, modemLabel)], allowedMentions: { parse: [] } });
   }
 
